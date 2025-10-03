@@ -5,6 +5,7 @@ import { useMessages } from '../hooks/useMessages';
 import { useDebug } from '../hooks/useDebug';
 import { useDeviceConnection } from '../hooks/useDeviceConnection';
 import { useAppFlow } from '../hooks/useAppFlow';
+import { useBluetoothManager } from '../hooks/useBluetoothManager';
 import { initDB } from '../database/database';
 
 const AppContext = createContext();
@@ -25,55 +26,69 @@ export default function AppProvider({ children }) {
 
   // Custom hooks
   const { debugInfo, addDebugInfo } = useDebug();
-  const { manager, bleState, permissionsGranted, bleManagerRef, cleanup } = useBLE(addDebugInfo);
-  const { messages, setMessages, addMessage, clearMessages } = useMessages(addDebugInfo);
-  const { 
-    device, 
-    isConnected, 
-    meshStatus, 
-    setDevice, 
-    setIsConnected, 
-    setMeshStatus, 
-    connectToDevice, 
-    disconnect 
-  } = useDeviceConnection(bleManagerRef, addDebugInfo, addMessage);
+  const { bleManagerRef, bleState, permissionsGranted } = useBLE(addDebugInfo);
   
-  const appFlowState = useAppFlow();
-
-  const value = {
-    // BLE related
-    manager,
-    bleState,
-    permissionsGranted,
-    bleManagerRef,
-    cleanup,
-    
-    // Debug
-    debugInfo,
-    addDebugInfo,
-    
-    // Messages
-    messages,
-    setMessages,
-    addMessage,
-    clearMessages,
-    
-    // Device Connection
+  // Initialize Bluetooth manager
+  const {
     device,
     isConnected,
-    meshStatus,
-    setDevice,
-    setIsConnected,
-    setMeshStatus,
     connectToDevice,
-    disconnect,
-    
-    // App Flow
-    ...appFlowState,
-  };
+    disconnect: disconnectDevice,
+    error: bluetoothError
+  } = useBluetoothManager(bleManagerRef, addDebugInfo);
+  
+  const { messages, setMessages, addMessage, clearMessages } = useMessages(addDebugInfo);
+  
+  // Initialize device connection for messaging
+  const { meshStatus, sendMessage } = useDeviceConnection(
+    device, 
+    isConnected, 
+    addDebugInfo, 
+    addMessage
+  );
+  
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (isConnected && device) {
+        disconnectDevice();
+      }
+    };
+  }, [isConnected, device, disconnectDevice]);
+  
+  const appFlowState = useAppFlow();
+  const { 
+    showBluetoothConnection, 
+    skipBluetoothConnection, 
+    completeBluetoothConnection,
+    ...restAppFlowState 
+  } = appFlowState;
 
   return (
-    <AppContext.Provider value={value}>
+    <AppContext.Provider value={{
+      // State
+      debugInfo,
+      messages,
+      bleState,
+      permissionsGranted,
+      isBluetoothReady: true, // Always true as we handle initialization internally
+      isConnected,
+      device,
+      meshStatus,
+      bluetoothError,
+      showBluetoothConnection,
+      // Methods
+      skipBluetoothConnection,
+      addDebugInfo,
+      addMessage,
+      clearMessages,
+      connectToDevice,
+      disconnect: disconnectDevice,
+      sendMessage,
+      completeBluetoothConnection,
+      // App Flow
+      ...restAppFlowState,
+    }}>
       {children}
     </AppContext.Provider>
   );

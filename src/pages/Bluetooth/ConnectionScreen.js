@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,12 @@ import {
   StyleSheet,
 } from 'react-native';
 import { BLE_CONFIG } from '../../config/constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DeviceItem from './DeviceItem';
 
 const ConnectionScreen = ({
   bleState,
+  isConnected,
   isScanning,
   setIsScanning,
   availableDevices,
@@ -23,12 +25,21 @@ const ConnectionScreen = ({
   clearMessages,
   bleManagerRef,
   addDebugInfo,
+  onSkip,
+  onConnect,
 }) => {
+  const [localDebugInfo, setLocalDebugInfo] = useState('');
   const scanTimeoutRef = useRef(null);
 
   const scanForDevices = async () => {
-    if (!bleManagerRef.current) {
-      addDebugInfo('BLE manager not ready');
+    const debugMsg = `Initiating BLE scan. Manager ready: ${!!bleManagerRef.current}, BLE state: ${bleState}`;
+    addDebugInfo(debugMsg);
+    setLocalDebugInfo(prev => `${new Date().toISOString()}: ${debugInfo}\n${prev}`);
+    
+    if (!bleManagerRef?.current) {
+      const errorMsg = 'BLE manager not ready';
+      addDebugInfo(errorMsg);
+      setLocalDebugInfo(prev => `${new Date().toISOString()}: ${errorMsg}\n${prev}`);
       Alert.alert('BLE Not Ready', 'Bluetooth manager is not initialized yet.');
       return;
     }
@@ -92,38 +103,94 @@ const ConnectionScreen = ({
     addDebugInfo('BLE scan stopped');
   };
 
-  const renderDeviceItem = ({ item }) => (
-    <DeviceItem
-      device={item}
-      onPress={() => connectToDevice(item)}
-    />
-  );
+  // Handle device connection
+  const handleConnect = async (device) => {
+    try {
+      addDebugInfo(`Attempting to connect to device: ${device.name || device.id}`);
+      await connectToDevice(device);
+      addDebugInfo(`Successfully connected to ${device.name || device.id}`);
+      if (onConnect) {
+        onConnect();
+      } else {
+        addDebugInfo('Warning: onConnect callback is not defined');
+      }
+    } catch (error) {
+      const errorMsg = `Connection error: ${error.message || error}`;
+      console.error(errorMsg, error);
+      addDebugInfo(errorMsg);
+      Alert.alert('Connection Error', 'Failed to connect to the device. Please try again.');
+    }
+  };
+
+  // Auto-start scanning when component mounts
+  useEffect(() => {
+    const initScan = async () => {
+      addDebugInfo('ConnectionScreen mounted, initializing...');
+      await scanForDevices();
+    };
+    
+    initScan();
+    
+    // Clean up on unmount
+    return () => {
+      stopScan();
+      addDebugInfo('ConnectionScreen unmounted');
+    };
+  }, []);
+
+  const handleSkip = async () => {
+    try {
+      await AsyncStorage.setItem('bluetoothSkipped', 'true');
+      if (onSkip) {
+        onSkip();
+      } else {
+        addDebugInfo('Warning: onSkip callback is not defined');
+      }
+    } catch (error) {
+      console.error('Error saving skip status:', error);
+      addDebugInfo(`Error saving skip status: ${error.message}`);
+    }
+  };
 
   return (
     <View style={styles.connectionContainer}>
       <View style={styles.header}>
-        <Text style={styles.title}>Available Devices</Text>
-        <TouchableOpacity
-          style={[styles.button, isScanning && styles.buttonDisabled]}
-          onPress={isScanning ? stopScan : scanForDevices}
+        <Text style={styles.title}>Connect to Device</Text>
+        <TouchableOpacity 
+          style={styles.refreshButton} 
+          onPress={scanForDevices}
           disabled={isScanning}
         >
-          <Text style={styles.buttonText}>
-            {isScanning ? 'Stop Scan' : 'Scan for Devices'}
-          </Text>
+          <Text style={styles.refreshText}>⟳</Text>
         </TouchableOpacity>
       </View>
+      <Text style={styles.status}>
+        Status: {bleState || 'Unknown'}
+        {isConnected ? ' (Connected)' : ' (Not Connected)'}
+      </Text>
+      
+      <TouchableOpacity
+        style={[styles.button, isScanning && styles.buttonDisabled]}
+        onPress={isScanning ? stopScan : scanForDevices}
+        disabled={isScanning}
+      >
+        {isScanning ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <Text style={styles.buttonText}>Scan for Devices</Text>
+        )}
+      </TouchableOpacity>
 
-      {isScanning ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={BLE_CONFIG.COLORS.primary} />
-          <Text style={styles.loadingText}>Scanning for devices...</Text>
-        </View>
-      ) : availableDevices.length > 0 ? (
+      {availableDevices.length > 0 ? (
         <FlatList
           data={availableDevices}
-          renderItem={renderDeviceItem}
-          keyExtractor={item => item.id}
+          renderItem={({item}) => (
+            <DeviceItem
+              device={item}
+              onPress={() => handleConnect(item)}
+            />
+          )}
+          keyExtractor={(item) => item.id}
           contentContainerStyle={styles.deviceList}
         />
       ) : (
@@ -135,10 +202,17 @@ const ConnectionScreen = ({
         </View>
       )}
 
+      <TouchableOpacity
+        style={[styles.skipButton, styles.button]}
+        onPress={handleSkip}
+      >
+        <Text style={styles.buttonText}>Skip for Now</Text>
+      </TouchableOpacity>
+
       <View style={styles.debugContainer}>
         <Text style={styles.debugTitle}>Debug Info:</Text>
-        <Text style={styles.debugText} numberOfLines={3}>
-          {debugInfo}
+        <Text style={styles.debugText}>
+          {localDebugInfo || 'No debug information available'}
         </Text>
       </View>
     </View>
@@ -148,25 +222,38 @@ const ConnectionScreen = ({
 const styles = StyleSheet.create({
   connectionContainer: {
     flex: 1,
-    backgroundColor: '#fff',
-    padding: 16,
+    backgroundColor: '#f5f5f5',
+    padding: 20,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
+  },
+  refreshButton: {
+    padding: 8,
+  },
+  refreshText: {
+    fontSize: 20,
+    color: '#2c3e50',
   },
   title: {
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
   },
+  status: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 20,
+  },
   button: {
-    backgroundColor: BLE_CONFIG.COLORS.primary,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 8,
+    backgroundColor: '#2c3e50',
+    padding: 15,
+    borderRadius: 5,
+    marginVertical: 10,
+    alignItems: 'center',
   },
   buttonDisabled: {
     backgroundColor: '#ccc',
@@ -174,15 +261,6 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#fff',
     fontWeight: '600',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    color: '#666',
   },
   deviceList: {
     paddingBottom: 20,
@@ -201,6 +279,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#999',
     textAlign: 'center',
+  },
+  skipButton: {
+    backgroundColor: '#95a5a6',
+    marginTop: 20,
+    borderRadius: 8,
+    padding: 15,
+    alignItems: 'center',
   },
   debugContainer: {
     marginTop: 'auto',

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { insertUserData } from '../database/database';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const useAppFlow = () => {
   const [showOnboarding, setShowOnboarding] = useState(true);
@@ -10,9 +11,36 @@ export const useAppFlow = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showMessaging, setShowMessaging] = useState(false);
+  const [showBluetoothConnection, setShowBluetoothConnection] = useState(false);
+  const [bluetoothSkipped, setBluetoothSkipped] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [inputText, setInputText] = useState('');
   const [availableDevices, setAvailableDevices] = useState([]);
+
+  // Reset and force show Bluetooth connection first
+  useEffect(() => {
+    const resetAndShowBluetooth = async () => {
+      try {
+        // Reset the skip status
+        await AsyncStorage.setItem('bluetoothSkipped', 'false');
+        console.log('Reset Bluetooth skip status to false');
+        
+        // Force show Bluetooth connection screen
+        setShowBluetoothConnection(true);
+        setShowOnboarding(false);
+        setBluetoothSkipped(false);
+        
+      } catch (error) {
+        console.error('Error resetting Bluetooth state:', error);
+        // Ensure Bluetooth screen shows even if there's an error
+        setShowBluetoothConnection(true);
+        setShowOnboarding(false);
+      }
+    };
+    
+    // Run the reset
+    resetAndShowBluetooth();
+  }, []);
 
   // Onboarding completion
   const handleOnboardingComplete = async (userData) => {
@@ -26,19 +54,43 @@ export const useAppFlow = () => {
     }
   };
 
-  // Login completion - go directly to dashboard
+  // Login completion - show Bluetooth connection or dashboard
   const handleLoginComplete = async (userData) => {
     try {
       if (userData) {
         await insertUserData(userData);
       }
       setShowLogin(false);
-      setShowDashboard(true);
+      
+      // Only show Bluetooth connection if not previously skipped
+      if (!bluetoothSkipped) {
+        setShowBluetoothConnection(true);
+      } else {
+        setShowDashboard(true);
+      }
       setShowUserInfo(false);
-      console.log('Login completed, showing dashboard');
+      console.log('Login completed, showing Bluetooth connection');
     } catch (err) {
       console.error('Failed to save login data', err);
     }
+  };
+
+  // Skip Bluetooth connection
+  const skipBluetoothConnection = async () => {
+    try {
+      await AsyncStorage.setItem('bluetoothSkipped', 'true');
+      setBluetoothSkipped(true);
+      setShowBluetoothConnection(false);
+      setShowLogin(true); // Go to login after skipping Bluetooth
+    } catch (error) {
+      console.error('Error saving Bluetooth skip status:', error);
+    }
+  };
+
+  // Complete Bluetooth connection
+  const completeBluetoothConnection = () => {
+    setShowBluetoothConnection(false);
+    setShowLogin(true); // Go to login after successful connection
   };
 
   // UserInfo completion - return to dashboard
@@ -56,6 +108,7 @@ export const useAppFlow = () => {
     setShowHistory(false);
     setShowMap(false);
     setShowMessaging(false);
+    setShowBluetoothConnection(false);
   };
 
   // Navigation functions for each screen
@@ -89,6 +142,11 @@ export const useAppFlow = () => {
     setShowMessaging(true);
   };
 
+  const navigateToBluetoothConnection = () => {
+    resetAllScreenStates();
+    setShowBluetoothConnection(true);
+  };
+
   // Generic navigation handler
   const navigateToScreen = (screen) => {
     // Reset all screen states first
@@ -98,6 +156,7 @@ export const useAppFlow = () => {
     setShowHistory(false);
     setShowMap(false);
     setShowMessaging(false);
+    setShowBluetoothConnection(false);
 
     // Set the requested screen
     switch (screen) {
@@ -119,6 +178,9 @@ export const useAppFlow = () => {
       case 'messaging':
         setShowMessaging(true);
         break;
+      case 'bluetoothConnection':
+        setShowBluetoothConnection(true);
+        break;
       default:
         console.warn(`Unknown screen: ${screen}`);
         setShowDashboard(true);
@@ -135,6 +197,7 @@ export const useAppFlow = () => {
     setShowHistory(false);
     setShowMap(false);
     setShowMessaging(false);
+    setShowBluetoothConnection(false);
   };
 
   return {
@@ -146,28 +209,16 @@ export const useAppFlow = () => {
     showChannel,
     showHistory,
     showMap,
-    
-    // Other states
+    showMessaging,
+    showBluetoothConnection,
+    bluetoothSkipped,
     isScanning,
-    setIsScanning,
-    inputText,
-    setInputText,
     availableDevices,
     setAvailableDevices,
-    
-    // Completion handlers
     handleOnboardingComplete,
     handleLoginComplete,
     handleUserInfoComplete,
-    
-    // Navigation functions
-    navigateToDashboard,
-    navigateToUserInfo,
-    navigateToChannel,
-    navigateToHistory,
-    navigateToMap,
     navigateToScreen,
-    
     // Manual navigation (legacy)
     setShowDashboard,
     setShowUserInfo,
@@ -179,5 +230,9 @@ export const useAppFlow = () => {
     setShowOnboarding,
     setShowLogin,
     resetNavigationStates,
+    
+    // Bluetooth functions
+    skipBluetoothConnection,
+    completeBluetoothConnection,
   };
 };

@@ -25,6 +25,7 @@ export default function AppNavigator() {
     showHistory,
     showMap,
     showMessaging,
+    showBluetoothConnection,
     handleOnboardingComplete,
     handleLoginComplete,
     navigateToScreen,
@@ -49,16 +50,23 @@ export default function AppNavigator() {
     addMessage,
     addDebugInfo,
     bleManagerRef,
+    skipBluetoothConnection,
+    completeBluetoothConnection,
   } = useAppContext();
 
   const handleNavigate = (screen) => {
     navigateToScreen(screen);
   };
 
-  // Add this function to handle navigation to BLE connection
-  const handleNavigateToBLE = () => {
-    console.log('Navigating to BLE connection...');
-    resetNavigationStates(); // This will set all navigation states to false, allowing BLE screens to show
+  // Bind the skip function to ensure proper 'this' context
+  const handleSkipBluetooth = async () => {
+    console.log('Skipping Bluetooth connection...');
+    try {
+      await skipBluetoothConnection();
+    } catch (error) {
+      console.error('Error in skipBluetoothConnection:', error);
+      addDebugInfo(`Skip error: ${error.message}`);
+    }
   };
 
   // Helper function to get current screen for bottom nav
@@ -73,6 +81,30 @@ export default function AppNavigator() {
     if (showMessaging) return 'messaging';
     return 'unknown';
   };
+
+  // Show Bluetooth connection screen first if not skipped
+  if (showBluetoothConnection) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ConnectionScreen
+          bleState={bleState}
+          isConnected={isConnected}
+          isScanning={isScanning}
+          setIsScanning={setIsScanning}
+          availableDevices={availableDevices}
+          setAvailableDevices={setAvailableDevices}
+          debugInfo={debugInfo}
+          messages={messages}
+          connectToDevice={connectToDevice}
+          clearMessages={clearMessages}
+          bleManagerRef={bleManagerRef}
+          addDebugInfo={addDebugInfo}
+          onSkip={handleSkipBluetooth}
+          onConnect={completeBluetoothConnection}
+        />
+      </SafeAreaView>
+    );
+  }
 
   if (showOnboarding) return <OnboardingFlow onComplete={handleOnboardingComplete} />;
   if (showLogin) return <HikingLoginScreen onLoginComplete={handleLoginComplete} />;
